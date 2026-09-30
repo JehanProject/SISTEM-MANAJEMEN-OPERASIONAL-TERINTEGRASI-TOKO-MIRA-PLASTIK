@@ -1,0 +1,27 @@
+# Local environment and secrets
+/.env
+/.env.*
+!/env
+
+# Dependencies and generated files
+/vendor/
+/.phpunit.cache/
+/build/
+
+# Runtime data
+/writable/cache/*
+!/writable/cache/index.html
+/writable/debugbar/*
+!/writable/debugbar/index.html
+/writable/logs/*
+!/writable/logs/index.html
+/writable/session/*
+!/writable/session/index.html
+/writable/uploads/*
+!/writable/uploads/index.html
+
+# Local editor and operating system files
+/.idea/
+/.vscode/
+/.DS_Store
+/Thumbs.db
