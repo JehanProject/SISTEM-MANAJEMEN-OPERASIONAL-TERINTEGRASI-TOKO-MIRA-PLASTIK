@@ -6,6 +6,11 @@ class Home extends BaseController
 {
     public function index(): string
     {
-        return view('welcome_message');
+        $user = session()->get('auth_user') ?? [];
+
+        return view('welcome_message', [
+            'user'         => $user,
+            'databaseMode' => isset($user['tenant_id'], $user['store_id']),
+        ]);
     }
 }

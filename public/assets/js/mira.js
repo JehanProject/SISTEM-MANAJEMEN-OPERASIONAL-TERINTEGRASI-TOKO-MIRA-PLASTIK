@@ -54,10 +54,38 @@
             { action: 'Mencatat pembayaran bon', user: 'Dimas Putra', time: 'Kemarin', type: 'finance' }
         ], archives: [], cart: [], role: 'Owner'
     };
+    const databaseMode = document.body.dataset.apiMode === 'database';
+    const apiBase = document.body.dataset.apiBase || '/index.php/api/v1';
     let state;
-    try { state = JSON.parse(localStorage.getItem(STORE_KEY)) || seed; } catch { state = seed; }
+    if (databaseMode) {
+        state = { ...seed, products: [], transactions: [], receivables: [], payables: [], suppliers: [], expenses: [], employees: [], activity: [], archives: [], cart: [] };
+    } else {
+        try { state = JSON.parse(localStorage.getItem(STORE_KEY)) || seed; } catch { state = seed; }
+    }
+    let csrfToken = document.querySelector('.logout-form input[name]')?.value || '';
+    async function apiRequest(path, { method = 'GET', body } = {}) {
+        const headers = { Accept: 'application/json' };
+        const options = { method, credentials: 'same-origin', headers };
+        if (body !== undefined) {
+            headers['Content-Type'] = 'application/json';
+            headers['X-CSRF-TOKEN'] = csrfToken;
+            options.body = JSON.stringify(body);
+        }
+        const response = await fetch(`${apiBase}${path}`, options);
+        csrfToken = response.headers.get('X-CSRF-TOKEN') || csrfToken;
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || 'Permintaan ke server gagal.');
+        return result;
+    }
+    async function loadServerWorkspace() {
+        const workspace = await apiRequest('/workspace');
+        ['products', 'transactions', 'receivables', 'payables', 'suppliers', 'expenses', 'employees', 'activity', 'archives'].forEach(key => {
+            state[key] = Array.isArray(workspace[key]) ? workspace[key] : [];
+        });
+        state.cart = [];
+    }
     const save = () => {
-        localStorage.setItem(STORE_KEY, JSON.stringify(state));
+        if (!databaseMode) localStorage.setItem(STORE_KEY, JSON.stringify(state));
         renderNotifications();
     };
     const root = document.getElementById('view-root');
@@ -71,7 +99,11 @@
 
     document.getElementById('today-label').textContent = dateLabel;
     const navNames = { dashboard: 'Ringkasan', pos: 'Kasir POS', inventory: 'Barang & stok', debts: 'Utang & piutang', suppliers: 'Pemasok', team: 'Tim & aktivitas', finance: 'Arus kas', reports: 'Laporan & arsip' };
-    const getUser = () => state.employees.find(employee => employee.role === state.role) || state.employees[0] || { name: 'Rina Amelia', role: state.role, initials: 'RA' };
+    const getUser = () => ({
+        name: document.body.dataset.userName || 'Pemilik toko',
+        role: document.body.dataset.userRole || 'Owner',
+        initials: document.body.dataset.userInitials || 'PT'
+    });
     const initials = name => String(name).split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase();
     const setRoleUi = () => {
         const user = getUser();
@@ -167,7 +199,7 @@
     function renderInventory() {
         const query = (document.getElementById('inventory-search')?.value || '').toLowerCase();
         const products = state.products.filter(product => `${product.name} ${product.id} ${product.category}`.toLowerCase().includes(query));
-        root.innerHTML = `${pageHeader('Barang & stok', 'Pantau ketersediaan dan riwayat pergerakan barang.', '<button class="button" data-action="loss-stock">− Catat barang rusak</button><button class="button button-primary" data-action="restock">＋ Barang masuk</button>')}
+        root.innerHTML = `${pageHeader('Barang & stok', 'Pantau ketersediaan dan riwayat pergerakan barang.', '<button class="button" data-action="add-product">＋ Barang baru</button><button class="button" data-action="loss-stock">− Catat barang rusak</button><button class="button button-primary" data-action="restock">＋ Barang masuk</button>')}
             ${statsCards()}<div class="filters-row"><div class="search-box"><span class="search-symbol">⌕</span><input class="input-control" id="inventory-search" placeholder="Cari barang atau kode…" value="${escapeHtml(query)}"></div><select class="select-control" id="stock-filter"><option value="all">Semua status stok</option><option value="low">Perlu restock</option><option value="safe">Stok aman</option></select><span class="pill neutral">${state.products.length} produk terdaftar</span></div>
             <section class="panel table-panel"><div class="panel-heading"><div><h2 class="panel-title">Daftar barang</h2><p class="panel-subtitle">Harga eceran dan grosir per satuan</p></div><button class="text-link" data-action="export-stock">Ekspor CSV ↓</button></div><div class="table-wrap"><table><thead><tr><th>Produk</th><th>Kategori</th><th>Stok tersedia</th><th>Min. stok</th><th>Harga eceran</th><th>Harga grosir</th><th>Status</th><th></th></tr></thead><tbody>${products.map(product => `<tr><td><div class="product-cell">${productIcon(product)}<div class="product-copy"><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(product.id)} · per ${escapeHtml(product.unit)}</small></div></div></td><td>${escapeHtml(product.category)}</td><td><strong>${product.stock} ${escapeHtml(product.unit)}</strong></td><td>${product.min}</td><td>${currency(product.retail)}</td><td>${currency(product.wholesale)}</td><td>${statusPill(product.stock <= product.min ? (product.stock === 0 ? 'Habis' : 'Menipis') : 'Aman', product.stock === 0 ? 'danger' : product.stock <= product.min ? 'warning' : '')}</td><td><button class="text-link" data-restock-product="${escapeHtml(product.id)}">＋ Stok</button></td></tr>`).join('') || '<tr><td colspan="8" class="empty-state">Tidak ada barang yang sesuai.</td></tr>'}</tbody></table></div></section>`;
         const filter = document.getElementById('stock-filter');
@@ -238,8 +270,12 @@
             <section class="panel table-panel"><div class="panel-heading"><div><h2 class="panel-title">Penerimaan barang terakhir</h2><p class="panel-subtitle">Log restock dan nilai pengadaan</p></div></div><div class="table-wrap"><table><thead><tr><th>Tanggal</th><th>Aktivitas</th><th>Petugas</th><th>Nilai</th></tr></thead><tbody>${state.activity.filter(item => item.action.startsWith('Menerima')).map(item => `<tr><td>${escapeHtml(item.time)}</td><td><strong>${escapeHtml(item.action)}</strong></td><td>${escapeHtml(item.user)}</td><td>—</td></tr>`).join('') || '<tr><td colspan="4" class="empty-state">Penerimaan barang akan tampil di sini.</td></tr>'}</tbody></table></div></section>`;
     }
     function renderTeam() {
-        root.innerHTML = `${pageHeader('Tim & aktivitas', 'Atur peran operasional dan telusuri jejak aktivitas.', '<button class="button button-primary" data-action="add-employee">＋ Tambah karyawan</button>')}
-            <section class="panel table-panel" style="margin-bottom:15px"><div class="panel-heading"><div><h2 class="panel-title">Pengguna sistem</h2><p class="panel-subtitle">Hak akses berdasarkan peran pengguna</p></div></div><div class="table-wrap"><table><thead><tr><th>Nama karyawan</th><th>ID pengguna</th><th>Peran akses</th><th>Hak akses utama</th><th>Status</th></tr></thead><tbody>${state.employees.map(employee => `<tr><td><div class="product-cell"><span class="avatar avatar-green">${escapeHtml(employee.initials)}</span><strong>${escapeHtml(employee.name)}</strong></div></td><td>${escapeHtml(employee.id)}</td><td><select class="select-control employee-role" data-employee-role="${escapeHtml(employee.id)}"><option ${employee.role === 'Owner' ? 'selected' : ''}>Owner</option><option ${employee.role === 'Kasir' ? 'selected' : ''}>Kasir</option><option ${employee.role === 'Petugas Gudang' ? 'selected' : ''}>Petugas Gudang</option></select></td><td>${employee.role === 'Owner' ? 'Semua modul & laporan' : employee.role === 'Kasir' ? 'POS & transaksi' : 'Barang & penerimaan stok'}</td><td>${statusPill(employee.status)}</td></tr>`).join('')}</tbody></table></div></section>
+        const actions = databaseMode ? '' : '<button class="button button-primary" data-action="add-employee">＋ Tambah karyawan</button>';
+        const roleControl = employee => databaseMode
+            ? `<span>${escapeHtml(employee.role)}</span>`
+            : `<select class="select-control employee-role" data-employee-role="${escapeHtml(employee.id)}"><option ${employee.role === 'Owner' ? 'selected' : ''}>Owner</option><option ${employee.role === 'Kasir' ? 'selected' : ''}>Kasir</option><option ${employee.role === 'Petugas Gudang' ? 'selected' : ''}>Petugas Gudang</option></select>`;
+        root.innerHTML = `${pageHeader('Tim & aktivitas', databaseMode ? 'Membership tenant dan role dari database aktif.' : 'Atur peran operasional dan telusuri jejak aktivitas.', actions)}
+            <section class="panel table-panel" style="margin-bottom:15px"><div class="panel-heading"><div><h2 class="panel-title">Pengguna sistem</h2><p class="panel-subtitle">Hak akses berdasarkan peran pengguna</p></div></div><div class="table-wrap"><table><thead><tr><th>Nama karyawan</th><th>ID pengguna</th><th>Peran akses</th><th>Hak akses utama</th><th>Status</th></tr></thead><tbody>${state.employees.map(employee => `<tr><td><div class="product-cell"><span class="avatar avatar-green">${escapeHtml(employee.initials)}</span><strong>${escapeHtml(employee.name)}</strong></div></td><td>${escapeHtml(employee.id)}</td><td>${roleControl(employee)}</td><td>${employee.role === 'Owner' ? 'Semua modul & laporan' : employee.role === 'Kasir' ? 'POS & transaksi' : 'Barang & penerimaan stok'}</td><td>${statusPill(employee.status)}</td></tr>`).join('')}</tbody></table></div></section>
             <section class="panel table-panel"><div class="panel-heading"><div><h2 class="panel-title">Log aktivitas</h2><p class="panel-subtitle">Perubahan transaksi, stok, dan keuangan terbaru</p></div><button class="text-link" data-action="export-activity">Ekspor log ↓</button></div><div class="table-wrap"><table><thead><tr><th>Waktu</th><th>Aktivitas</th><th>Pengguna</th><th>Jenis</th></tr></thead><tbody>${state.activity.map(item => `<tr><td>${escapeHtml(item.time)}</td><td><strong>${escapeHtml(item.action)}</strong></td><td>${escapeHtml(item.user)}</td><td>${statusPill(item.type === 'sale' ? 'Transaksi' : item.type === 'finance' ? 'Keuangan' : 'Inventaris', item.type === 'sale' ? 'blue' : '')}</td></tr>`).join('')}</tbody></table></div></section>`;
     }
     function renderFinance() {
@@ -294,19 +330,73 @@
         modalRoot.querySelector('[data-close-modal]').focus();
         modalRoot.querySelector('[data-close-modal]').addEventListener('click', closeModal);
         modalRoot.querySelector('.modal-backdrop').addEventListener('click', event => { if (event.target.classList.contains('modal-backdrop')) closeModal(); });
-        modalRoot.querySelector('#modal-form').addEventListener('submit', event => { event.preventDefault(); const data = Object.fromEntries(new FormData(event.currentTarget)); onSubmit(data); closeModal(); save(); renderers[currentView](); });
+        modalRoot.querySelector('#modal-form').addEventListener('submit', async event => {
+            event.preventDefault();
+            const form = event.currentTarget;
+            const submitButton = form.querySelector('[type="submit"]');
+            const data = Object.fromEntries(new FormData(form));
+            submitButton.disabled = true;
+            try {
+                await onSubmit(data);
+                closeModal();
+                save();
+                renderers[currentView]();
+            } catch (error) {
+                showToast(error.message || 'Data gagal disimpan.');
+            } finally {
+                if (submitButton.isConnected) submitButton.disabled = false;
+            }
+        });
     }
     function closeModal() { modalRoot.innerHTML = ''; }
     function field(label, name, type = 'text', options = {}) {
         const required = options.required === false ? '' : 'required';
         if (type === 'select') return `<div class="form-field ${options.full ? 'full' : ''}"><label>${label}</label><select name="${name}" ${required}>${options.options.map(option => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`).join('')}</select></div>`;
-        return `<div class="form-field ${options.full ? 'full' : ''}"><label>${label}</label><input name="${name}" type="${type}" ${type === 'number' ? 'min="1" step="1"' : ''} ${options.value ? `value="${escapeHtml(options.value)}"` : ''} ${required} ${options.placeholder ? `placeholder="${escapeHtml(options.placeholder)}"` : ''}></div>`;
+        const numericAttributes = type === 'number' ? `min="${options.min ?? 1}" step="${options.step ?? 1}"` : '';
+        return `<div class="form-field ${options.full ? 'full' : ''}"><label>${label}</label><input name="${name}" type="${type}" ${numericAttributes} ${options.value ? `value="${escapeHtml(options.value)}"` : ''} ${required} ${options.placeholder ? `placeholder="${escapeHtml(options.placeholder)}"` : ''}></div>`;
+    }
+    function addProductModal() {
+        showModal('Tambah barang', 'Tambahkan produk ke katalog toko dan catat stok awal.', `${field('SKU', 'sku')}${field('Nama barang', 'name')}${field('Kategori', 'category')}${field('Satuan', 'unit')}${field('Stok minimum', 'minimum_stock', 'number', { min: 0, step: '0.001', value: 0 })}${field('Stok awal', 'opening_stock', 'number', { min: 0, step: '0.001', value: 0 })}${field('Harga modal (Rp)', 'cost_rupiah', 'number', { min: 0, value: 0 })}${field('Harga eceran (Rp)', 'retail_rupiah', 'number', { min: 0, value: 0 })}${field('Harga grosir (Rp)', 'wholesale_rupiah', 'number', { min: 0, value: 0 })}`, async data => {
+            if (databaseMode) {
+                await apiRequest('/products', { method: 'POST', body: {
+                    sku: data.sku,
+                    name: data.name,
+                    category: data.category,
+                    unit: data.unit,
+                    minimum_stock: Number(data.minimum_stock),
+                    opening_stock: Number(data.opening_stock),
+                    cost_rupiah: Number(data.cost_rupiah),
+                    retail_rupiah: Number(data.retail_rupiah),
+                    wholesale_rupiah: Number(data.wholesale_rupiah)
+                } });
+                await loadServerWorkspace();
+                showToast('Barang tersimpan di database toko.');
+                return;
+            }
+
+            state.products.unshift({ id: `P-${Date.now()}`, ...data, min: Number(data.minimum_stock), stock: Number(data.opening_stock), cost: Number(data.cost_rupiah), retail: Number(data.retail_rupiah), wholesale: Number(data.wholesale_rupiah), color: 'green' });
+            addActivity(`Menambahkan barang ${data.name}`);
+            showToast('Barang ditambahkan.');
+        }, 'Simpan barang');
     }
     function restockModal(productId = '') {
         const productOptions = state.products.map(product => `<option value="${escapeHtml(product.id)}" ${product.id === productId ? 'selected' : ''}>${escapeHtml(product.name)} · stok ${product.stock}</option>`).join('');
         const supplierOptions = state.suppliers.map(supplier => supplier.name).join('|');
         const supplierHtml = `<div class="form-field"><label>Pemasok</label><select name="supplier" required>${supplierOptions.split('|').map(name => `<option>${escapeHtml(name)}</option>`).join('')}<option>Pemasok baru</option></select></div>`;
-        showModal('Catat barang masuk', 'Jumlah stok akan ditambahkan ke inventaris dan log aktivitas.', `<div class="form-field full"><label>Produk</label><select name="product" required>${productOptions}</select></div>${field('Jumlah masuk', 'quantity', 'number')}${field('Harga modal per unit (Rp)', 'cost', 'number')}${supplierHtml}${field('Pembayaran', 'payment', 'select', { options: ['Tunai', 'Utang pemasok'] })}`, data => {
+        showModal('Catat barang masuk', 'Jumlah stok akan ditambahkan ke inventaris dan log aktivitas.', `<div class="form-field full"><label>Produk</label><select name="product" required>${productOptions}</select></div>${field('Jumlah masuk', 'quantity', 'number')}${field('Harga modal per unit (Rp)', 'cost', 'number')}${supplierHtml}${field('Pembayaran', 'payment', 'select', { options: ['Tunai', 'Utang pemasok'] })}`, async data => {
+            if (databaseMode) {
+                await apiRequest('/stock-movements', { method: 'POST', body: {
+                    product_id: Number(data.product),
+                    quantity_delta: Number(data.quantity),
+                    movement_type: 'purchase_receipt',
+                    unit_cost_rupiah: Number(data.cost),
+                    supplier_name: data.supplier,
+                    payment_method: data.payment
+                } });
+                await loadServerWorkspace();
+                showToast('Penerimaan pembelian tersimpan di server.');
+                return;
+            }
             const product = state.products.find(item => item.id === data.product); if (!product) return;
             const quantity = Number(data.quantity); const cost = Number(data.cost);
             product.stock += quantity; product.cost = cost;
@@ -319,7 +409,18 @@
     }
     function markLossModal() {
         const options = state.products.map(product => `<option value="${escapeHtml(product.id)}">${escapeHtml(product.name)} · tersedia ${product.stock} ${escapeHtml(product.unit)}</option>`).join('');
-        showModal('Catat barang rusak / hilang', 'Stok akan disesuaikan dan nilai kerugian tercatat.', `<div class="form-field full"><label>Produk</label><select name="product" required>${options}</select></div>${field('Jumlah barang', 'quantity', 'number')}${field('Keterangan', 'note', 'text', { placeholder: 'Contoh: kemasan rusak' })}`, data => {
+        showModal('Catat barang rusak / hilang', 'Stok akan disesuaikan dan nilai kerugian tercatat.', `<div class="form-field full"><label>Produk</label><select name="product" required>${options}</select></div>${field('Jumlah barang', 'quantity', 'number')}${field('Keterangan', 'note', 'text', { placeholder: 'Contoh: kemasan rusak' })}`, async data => {
+            if (databaseMode) {
+                await apiRequest('/stock-movements', { method: 'POST', body: {
+                    product_id: Number(data.product),
+                    quantity_delta: -Number(data.quantity),
+                    movement_type: 'damage',
+                    note: data.note
+                } });
+                await loadServerWorkspace();
+                showToast('Penyesuaian stok tersimpan di server.');
+                return;
+            }
             const product = state.products.find(item => item.id === data.product); const quantity = Number(data.quantity);
             if (!product || quantity > product.stock) { showToast('Jumlah melebihi stok tersedia.'); return; }
             product.stock -= quantity;
@@ -328,20 +429,40 @@
         });
     }
     function addExpenseModal() {
-        showModal('Catat pengeluaran', 'Pengeluaran akan masuk ke laporan arus kas.', `${field('Keterangan', 'label', 'text', { full: true })}${field('Kategori', 'category', 'select', { options: ['Operasional', 'Utilitas', 'Transportasi', 'Pembelian stok', 'Kerugian barang', 'Lainnya'] })}${field('Jumlah (Rp)', 'amount', 'number')}${field('Metode pembayaran', 'method', 'select', { options: ['Tunai', 'Transfer', 'QRIS'] })}`, data => {
+        showModal('Catat pengeluaran', 'Pengeluaran akan masuk ke laporan arus kas.', `${field('Keterangan', 'label', 'text', { full: true })}${field('Kategori', 'category', 'select', { options: ['Operasional', 'Utilitas', 'Transportasi', 'Pembelian stok', 'Kerugian barang', 'Lainnya'] })}${field('Jumlah (Rp)', 'amount', 'number')}${field('Metode pembayaran', 'method', 'select', { options: ['Tunai', 'Transfer', 'QRIS'] })}`, async data => {
+            if (databaseMode) {
+                await apiRequest('/expenses', { method: 'POST', body: { ...data, amount: Number(data.amount) } });
+                await loadServerWorkspace();
+                showToast('Pengeluaran tersimpan di server.');
+                return;
+            }
             state.expenses.unshift({ id: `EXP-${String(Date.now()).slice(-5)}`, date: dateIso(), ...data, amount: Number(data.amount) }); addActivity(`Mencatat pengeluaran ${data.label}`); showToast('Pengeluaran berhasil dicatat.');
         });
     }
     function addDebtModal(type) {
         const isReceivable = type === 'receivable';
-        showModal(isReceivable ? 'Catat piutang pelanggan' : 'Catat utang pemasok', 'Masukkan nilai tagihan dan tanggal jatuh tempo.', `${field(isReceivable ? 'Nama pelanggan' : 'Nama pemasok', 'party')}${field(isReceivable ? 'Nomor telepon' : 'Nomor referensi', 'note', 'text', { required: false })}${field('Nilai tagihan (Rp)', 'amount', 'number')}${field('Jatuh tempo', 'due', 'date', { value: dateIso(14) })}`, data => {
+        showModal(isReceivable ? 'Catat piutang pelanggan' : 'Catat utang pemasok', 'Masukkan nilai tagihan dan tanggal jatuh tempo.', `${field(isReceivable ? 'Nama pelanggan' : 'Nama pemasok', 'party')}${field(isReceivable ? 'Nomor telepon' : 'Nomor referensi', 'note', 'text', { required: false })}${field('Nilai tagihan (Rp)', 'amount', 'number')}${field('Jatuh tempo', 'due', 'date', { value: dateIso(14) })}`, async data => {
+            if (databaseMode) {
+                await apiRequest('/debts', { method: 'POST', body: { ...data, type, amount: Number(data.amount) } });
+                await loadServerWorkspace();
+                showToast(`${isReceivable ? 'Piutang' : 'Utang'} tersimpan di server.`);
+                return;
+            }
             const list = isReceivable ? state.receivables : state.payables;
             list.unshift({ id: `${isReceivable ? 'PIU' : 'UTG'}-${String(Date.now()).slice(-5)}`, [isReceivable ? 'customer' : 'supplier']: data.party, ...(isReceivable ? { phone: data.note } : {}), original: Number(data.amount), paid: 0, due: data.due, note: data.note });
             addActivity(`Mencatat ${isReceivable ? 'piutang' : 'utang'} ${data.party}`); showToast('Tagihan berhasil dicatat.');
         });
     }
     function addSupplierModal() {
-        showModal('Tambah pemasok', 'Simpan informasi kontak distributor baru.', `${field('Nama pemasok', 'name')}${field('Nomor telepon', 'contact', 'tel')}${field('Skema pembayaran', 'status', 'select', { options: ['Tunai', 'Kredit 14 hari', 'Kredit 30 hari'] })}`, data => { state.suppliers.unshift({ ...data, lastOrder: dateIso(), total: 0 }); addActivity(`Menambahkan pemasok ${data.name}`); showToast('Pemasok ditambahkan.'); });
+        showModal('Tambah pemasok', 'Simpan informasi kontak distributor baru.', `${field('Nama pemasok', 'name')}${field('Nomor telepon', 'contact', 'tel')}${field('Skema pembayaran', 'status', 'select', { options: ['Tunai', 'Kredit 14 hari', 'Kredit 30 hari'] })}`, async data => {
+            if (databaseMode) {
+                await apiRequest('/suppliers', { method: 'POST', body: { name: data.name, phone: data.contact, payment_terms: data.status } });
+                await loadServerWorkspace();
+                showToast('Pemasok tersimpan di server.');
+                return;
+            }
+            state.suppliers.unshift({ ...data, lastOrder: dateIso(), total: 0 }); addActivity(`Menambahkan pemasok ${data.name}`); showToast('Pemasok ditambahkan.');
+        });
     }
     function addEmployeeModal() {
         showModal('Tambah karyawan', 'Berikan peran akses sesuai tanggung jawab operasional.', `${field('Nama lengkap', 'name')}${field('Peran', 'role', 'select', { options: ['Kasir', 'Petugas Gudang', 'Owner'] })}`, data => { state.employees.push({ id: `EMP-${String(Date.now()).slice(-4)}`, name: data.name, role: data.role, initials: initials(data.name), status: 'Aktif' }); addActivity(`Menambahkan pengguna ${data.name}`); showToast('Pengguna baru ditambahkan.'); });
@@ -349,7 +470,13 @@
     function recordDebtPayment(id, type) {
         const debt = (type === 'receivable' ? state.receivables : state.payables).find(item => item.id === id);
         if (!debt) return;
-        showModal(type === 'receivable' ? 'Catat cicilan pelanggan' : 'Catat pembayaran pemasok', `Sisa saldo ${currency(debt.original - debt.paid)}.`, `${field('Jumlah pembayaran (Rp)', 'amount', 'number')}${field('Metode', 'method', 'select', { options: ['Tunai', 'Transfer', 'QRIS'] })}`, data => {
+        showModal(type === 'receivable' ? 'Catat cicilan pelanggan' : 'Catat pembayaran pemasok', `Sisa saldo ${currency(debt.original - debt.paid)}.`, `${field('Jumlah pembayaran (Rp)', 'amount', 'number')}${field('Metode', 'method', 'select', { options: ['Tunai', 'Transfer', 'QRIS'] })}`, async data => {
+            if (databaseMode) {
+                await apiRequest('/debt-payments', { method: 'POST', body: { id: Number(id), type, amount: Number(data.amount), method: data.method } });
+                await loadServerWorkspace();
+                showToast('Pembayaran tersimpan di server.');
+                return;
+            }
             const amount = Number(data.amount); if (amount > debt.original - debt.paid) { showToast('Pembayaran melebihi sisa saldo.'); return; }
             debt.paid += amount;
             if (type === 'payable') state.expenses.unshift({ id: `PAY-${String(Date.now()).slice(-5)}`, date: dateIso(), label: `Pembayaran ${debt.supplier}`, category: 'Pembayaran utang', amount, method: data.method });
@@ -362,6 +489,7 @@
         const name = document.getElementById('customer-name').value.trim() || 'Pelanggan umum';
         const lines = state.cart.map(line => ({ ...line, product: state.products.find(product => product.id === line.id) })).filter(line => line.product);
         if (!lines.length) return;
+        if (databaseMode) { void checkoutOnServer(lines, saleType, payment, name); return; }
         const invalid = lines.find(line => line.qty > line.product.stock);
         if (invalid) { showToast(`Stok ${invalid.product.name} tidak mencukupi.`); return; }
         const total = lines.reduce((sum, line) => sum + line.product[saleType] * line.qty, 0);
@@ -374,6 +502,21 @@
         if (confirm(`Transaksi ${id} berhasil. Total ${currency(total)}.\nCetak struk sekarang?`)) printReceipt({ id, name, total, payment, lines, saleType });
         else showToast(`Transaksi ${id} berhasil disimpan.`);
         navigate('dashboard');
+    }
+    async function checkoutOnServer(lines, saleType, payment, name) {
+        try {
+            const response = await apiRequest('/transactions', { method: 'POST', body: {
+                customer_name: name,
+                payment_method: payment,
+                sale_type: saleType,
+                lines: lines.map(line => ({ product_id: Number(line.id), quantity: Number(line.qty) }))
+            } });
+            await loadServerWorkspace();
+            showToast(`Transaksi ${response.transaction.id} tersimpan di server.`);
+            navigate('dashboard');
+        } catch (error) {
+            showToast(error.message || 'Transaksi gagal disimpan.');
+        }
     }
     function printReceipt(sale) {
         const receipt = window.open('', '_blank', 'width=360,height=640');
@@ -391,6 +534,7 @@
 
     document.addEventListener('click', event => {
         const nav = event.target.closest('[data-view]'); if (nav) { navigate(nav.dataset.view); return; }
+        if (event.target.closest('[data-action="add-product"]')) { addProductModal(); return; }
         const category = event.target.closest('[data-category]'); if (category) { productCategory = category.dataset.category; renderPos(); return; }
         const add = event.target.closest('[data-add-cart]'); if (add) { const product = state.products.find(item => item.id === add.dataset.addCart); const line = state.cart.find(item => item.id === product.id); if (line) line.qty += 1; else state.cart.push({ id: product.id, qty: 1 }); save(); renderPos(); return; }
         const increment = event.target.closest('[data-cart-inc]'); if (increment) { const line = state.cart.find(item => item.id === increment.dataset.cartInc); const product = state.products.find(item => item.id === line.id); if (line.qty < product.stock) line.qty += 1; else showToast('Jumlah melebihi stok tersedia.'); save(); renderPos(); return; }
@@ -409,6 +553,15 @@
             const month = document.getElementById('archive-month').value; const year = document.getElementById('archive-year').value; const period = `${year}-${month}`;
             if (state.archives.some(item => item.period === period)) { showToast('Periode ini sudah diarsipkan.'); return; }
             const summary = monthlySummary(Number(year), Number(month)); const label = new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' }).format(new Date(Number(year), Number(month) - 1, 1));
+            if (databaseMode) {
+                void (async () => {
+                    await apiRequest('/report-archives', { method: 'POST', body: { period, snapshot: { label, ...summary, stock: state.products.map(({ id, name, stock }) => ({ id, name, stock })) } } });
+                    await loadServerWorkspace();
+                    renderReports();
+                    showToast(`Laporan ${label} tersimpan di server.`);
+                })().catch(error => showToast(error.message || 'Arsip laporan gagal disimpan.'));
+                return;
+            }
             state.archives.push({ period, label, archivedAt: dateIso(), ...summary, stock: state.products.map(({ id, name, stock }) => ({ id, name, stock })) }); addActivity(`Mengarsipkan laporan ${label}`); save(); renderReports(); showToast(`Laporan ${label} berhasil diarsipkan.`); return;
         }
         if (event.target.closest('[data-action="export-report"]')) { exportReport(); return; }
@@ -417,10 +570,6 @@
         if (event.target.closest('[data-action="export-activity"]')) { exportCsv('aktivitas-mira-plastik.csv', [['Waktu', 'Aktivitas', 'Pengguna', 'Jenis'], ...state.activity.map(item => [item.time, item.action, item.user, item.type])]); return; }
         const archiveExport = event.target.closest('[data-export-archive]'); if (archiveExport) { const item = state.archives.find(archive => archive.period === archiveExport.dataset.exportArchive); if (item) exportCsv(`arsip-mira-${item.period}.csv`, [['Periode', item.label], ['Transaksi', item.transactions], ['Penjualan', item.sales], ['Modal barang', item.cogs], ['Biaya operasional', item.expenses], ['Laba bersih', item.profit], [], ['Kode', 'Nama barang', 'Stok akhir'], ...item.stock.map(product => [product.id, product.name, product.stock])]); return; }
         if (event.target.closest('[data-action="print-report"]')) { window.print(); return; }
-        if (event.target.closest('#role-picker') || event.target.closest('#profile-button')) {
-            const roles = [...new Set(state.employees.map(employee => employee.role))];
-            showModal('Ganti pengguna aktif', 'Tampilan hak akses dapat disimulasikan untuk tiap peran.', `<div class="form-field full"><label>Pengguna</label><select name="role">${roles.map(role => `<option ${role === state.role ? 'selected' : ''}>${escapeHtml(role)}</option>`).join('')}</select></div>`, data => { state.role = data.role; setRoleUi(); renderers[currentView](); showToast(`Beralih ke peran ${data.role}.`); }, 'Beralih'); return;
-        }
         if (event.target.closest('#notification-button')) {
             const button = document.getElementById('notification-button');
             const panel = document.getElementById('notification-popover');
@@ -458,8 +607,20 @@
     });
     document.addEventListener('keydown', event => { if (event.key === 'F2') { event.preventDefault(); navigate('pos'); document.getElementById('product-search')?.focus(); } if (event.key === 'Escape') closeModal(); });
     document.getElementById('mobile-menu').addEventListener('click', () => document.getElementById('sidebar').classList.toggle('open'));
-    setRoleUi();
-    renderNotifications();
-    const initialView = window.location.hash.slice(1);
-    navigate(renderers[initialView] ? initialView : 'dashboard');
+    async function initializeWorkspace() {
+        setRoleUi();
+        if (databaseMode) {
+            document.getElementById('storage-label').innerHTML = 'Data tersimpan di server <i class="sync-dot"></i>';
+            try {
+                await loadServerWorkspace();
+            } catch (error) {
+                root.innerHTML = `<section class="panel"><h1 class="panel-title">Data toko belum dapat dimuat</h1><p class="panel-subtitle">${escapeHtml(error.message)}</p></section>`;
+                return;
+            }
+        }
+        renderNotifications();
+        const initialView = window.location.hash.slice(1);
+        navigate(renderers[initialView] ? initialView : 'dashboard');
+    }
+    void initializeWorkspace();
 })();

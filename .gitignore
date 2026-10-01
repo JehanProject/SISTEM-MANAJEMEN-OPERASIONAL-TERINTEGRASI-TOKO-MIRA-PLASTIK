@@ -11,6 +11,7 @@
 # Runtime data
 /writable/cache/*
 !/writable/cache/index.html
+/writable/auth/
 /writable/debugbar/*
 !/writable/debugbar/index.html
 /writable/logs/*

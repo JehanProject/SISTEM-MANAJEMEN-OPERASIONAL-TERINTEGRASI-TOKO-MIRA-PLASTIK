@@ -1,3 +1,13 @@
+<?php
+$userName = $user['name'] ?? 'Pemilik toko';
+$userRole = $user['role'] ?? 'Owner';
+$tenantName = $user['tenant_name'] ?? 'Toko Mira Plastik';
+$storeName = $user['store_name'] ?? 'Cabang utama';
+$userInitials = strtoupper(implode('', array_map(
+    static fn (string $part): string => mb_substr($part, 0, 1),
+    array_slice(preg_split('/\s+/', trim($userName)) ?: [], 0, 2),
+)));
+?>
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -10,14 +20,14 @@
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/assets/css/mira.css">
 </head>
-<body>
+<body data-api-mode="<?= $databaseMode ? 'database' : 'local' ?>" data-api-base="<?= esc(site_url('api/v1')) ?>" data-user-name="<?= esc($userName) ?>" data-user-role="<?= esc($userRole) ?>" data-user-initials="<?= esc($userInitials) ?>">
     <div class="app-shell">
         <aside class="sidebar" id="sidebar">
             <a class="brand" href="#dashboard" aria-label="Mira Plastik beranda">
                 <span class="brand-mark">M<span>.</span></span>
                 <span class="brand-copy"><strong>Mira Plastik</strong><small>OPERASIONAL TOKO</small></span>
             </a>
-            <div class="store-switch"><span class="store-dot"></span><span><strong>Toko Mira Plastik</strong><small>Cabang utama</small></span><span class="chevron">⌄</span></div>
+            <div class="store-switch"><span class="store-dot"></span><span><strong><?= esc($tenantName) ?></strong><small><?= esc($storeName) ?></small></span><span class="chevron">⌄</span></div>
             <div class="nav-label">MENU UTAMA</div>
             <nav class="main-nav" aria-label="Navigasi utama">
                 <button class="nav-link active" data-view="dashboard"><span class="nav-icon">⌂</span>Ringkasan</button>
@@ -32,7 +42,7 @@
             </nav>
             <div class="sidebar-bottom">
                 <div class="help-card"><span class="help-icon">i</span><span><strong>Ruang kendali toko</strong><small>Semua aktivitas tercatat.</small></span></div>
-                <button class="profile-button" id="profile-button"><span class="avatar avatar-green">RA</span><span class="profile-copy"><strong id="current-user-name">Rina Amelia</strong><small id="current-user-role">Pemilik toko</small></span><span class="profile-more">•••</span></button>
+                <div class="profile-button"><span class="avatar avatar-green"><?= esc($userInitials) ?></span><span class="profile-copy"><strong id="current-user-name"><?= esc($userName) ?></strong><small id="current-user-role"><?= esc($userRole) ?></small></span></div>
             </div>
         </aside>
 
@@ -44,11 +54,15 @@
                     <div class="today-label"><span class="today-dot"></span><span id="today-label">Hari ini</span></div>
                     <button class="icon-button notification-button" id="notification-button" aria-label="Notifikasi" aria-haspopup="true" aria-expanded="false"><span>♧</span><i></i><span class="notification-count" id="notification-count" hidden></span></button>
                     <div class="notification-popover" id="notification-popover" hidden></div>
-                    <button class="role-picker" id="role-picker"><span class="avatar avatar-green">RA</span><span><strong id="role-name">Rina Amelia</strong><small id="role-label">Owner</small></span><span class="chevron">⌄</span></button>
+                    <div class="role-picker"><span class="avatar avatar-green"><?= esc($userInitials) ?></span><span><strong id="role-name"><?= esc($userName) ?></strong><small id="role-label"><?= esc($userRole) ?></small></span></div>
+                    <form action="/logout" method="post" class="logout-form">
+                        <?= csrf_field() ?>
+                        <button class="logout-button" type="submit" aria-label="Keluar" title="Keluar">↪</button>
+                    </form>
                 </div>
             </header>
             <div id="view-root" class="view-root"></div>
-            <footer class="app-footer"><span>MIRA PLASTIK <span class="footer-separator">/</span> SISTEM OPERASIONAL</span><span>Data tersimpan di perangkat ini <i class="sync-dot"></i></span></footer>
+            <footer class="app-footer"><span>MIRA PLASTIK <span class="footer-separator">/</span> SISTEM OPERASIONAL</span><span id="storage-label">Data tersimpan di perangkat ini <i class="sync-dot"></i></span></footer>
         </main>
     </div>
     <div id="modal-root"></div>

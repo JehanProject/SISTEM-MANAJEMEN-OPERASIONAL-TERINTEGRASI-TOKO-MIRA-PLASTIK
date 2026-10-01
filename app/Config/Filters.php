@@ -2,6 +2,10 @@
 
 namespace Config;
 
+use App\Filters\AuthFilter;
+use App\Filters\CsrfFilter;
+use App\Filters\LoginThrottleFilter;
+use App\Filters\PermissionFilter;
 use CodeIgniter\Config\Filters as BaseFilters;
 use CodeIgniter\Filters\Cors;
 use CodeIgniter\Filters\CSRF;
@@ -25,7 +29,10 @@ class Filters extends BaseFilters
      * or [filter_name => [classname1, classname2, ...]]
      */
     public array $aliases = [
-        'csrf'          => CSRF::class,
+        'auth'          => AuthFilter::class,
+        'csrf'          => CsrfFilter::class,
+        'loginThrottle' => LoginThrottleFilter::class,
+        'permission'    => PermissionFilter::class,
         'toolbar'       => DebugToolbar::class,
         'honeypot'      => Honeypot::class,
         'invalidchars'  => InvalidChars::class,
@@ -73,12 +80,12 @@ class Filters extends BaseFilters
     public array $globals = [
         'before' => [
             // 'honeypot',
-            // 'csrf',
+            'csrf',
             // 'invalidchars',
         ],
         'after' => [
             // 'honeypot',
-            // 'secureheaders',
+            'secureheaders',
         ],
     ];
 

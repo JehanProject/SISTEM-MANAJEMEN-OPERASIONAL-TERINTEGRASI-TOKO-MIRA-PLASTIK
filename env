@@ -20,11 +20,21 @@
 # APP
 #--------------------------------------------------------------------
 
-# app.baseURL = ''
+# app.baseURL = 'http://127.0.0.1:8080/'
 # If you have trouble with `.`, you could also use `_`.
 # app_baseURL = ''
 # app.forceGlobalSecureRequests = false
 # app.CSPEnabled = false
+
+#--------------------------------------------------------------------
+# AUTHENTICATION
+#--------------------------------------------------------------------
+
+# Required only while creating the first owner account. Generate with:
+# php -r "echo bin2hex(random_bytes(32)), PHP_EOL;"
+# auth.setupToken = 'replace-with-a-long-random-secret'
+# auth.loginMaxAttempts = 5
+# auth.loginWindowSeconds = 60
 
 #--------------------------------------------------------------------
 # DATABASE
